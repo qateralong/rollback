@@ -20,6 +20,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.ChunkPos;
+import com.qateralong.rollback.mixin.IOWorkerAccessor;
 import net.minecraft.world.level.chunk.storage.IOWorker;
 
 public final class Recorder {
@@ -27,6 +28,8 @@ public final class Recorder {
     private static volatile Interval interval;
     private static volatile Path world;
     private static volatile boolean switching;
+    private static volatile boolean saving;
+    private static volatile long switchingSince;
     private static Journal previous;
 
     private record Interval(Journal journal, Set<String> recorded) {
@@ -55,8 +58,8 @@ public final class Recorder {
         return current == null ? -1L : current.journal().id;
     }
 
-    public static boolean busy() {
-        return switching;
+    public static boolean saving() {
+        return saving;
     }
 
     public static void start(Path worldPath) throws IOException {
@@ -121,12 +124,24 @@ public final class Recorder {
 
     public static long checkpoint(MinecraftServer server) {
         Interval closing = interval;
-        if (closing == null || switching) {
+        if (closing == null) {
             return -1L;
         }
+        if (switching) {
+            if (System.currentTimeMillis() - switchingSince < 60_000L) {
+                return -1L;
+            }
+            Rollback.LOGGER.warn("Previous checkpoint never finished flushing — continuing anyway");
+        }
         switching = true;
+        switchingSince = System.currentTimeMillis();
         try {
-            server.saveEverything(true, false, false);
+            saving = true;
+            try {
+                server.saveEverything(true, false, false);
+            } finally {
+                saving = false;
+            }
             TrackedFiles.diffInto(world, closing.journal());
             long now = System.currentTimeMillis() / 1000L;
             long step = Math.max(1, RollbackConfig.get().checkpointSeconds);
@@ -135,10 +150,15 @@ public final class Recorder {
             List<CompletableFuture<Void>> futures = new ArrayList<>();
             synchronized (WORKERS) {
                 for (IOWorker worker : WORKERS) {
-                    futures.add(worker.synchronize(false));
+                    if (!((IOWorkerAccessor) worker).rollback$shutdownRequested().get()) {
+                        futures.add(worker.synchronize(false));
+                    }
                 }
             }
-            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).whenComplete((result, error) -> {
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).orTimeout(15, java.util.concurrent.TimeUnit.SECONDS).whenComplete((result, error) -> {
+                if (error != null) {
+                    Rollback.LOGGER.warn("Region writes did not flush in 15 s, switching checkpoint anyway");
+                }
                 if (interval == closing) {
                     interval = new Interval(next);
                 }
@@ -151,8 +171,9 @@ public final class Recorder {
                 server.execute(() -> RollbackEvents.CHECKPOINT.invoker().onCheckpoint(java.time.Instant.ofEpochSecond(next.id)));
             });
             return next.id;
-        } catch (Exception e) {
+        } catch (Throwable e) {
             switching = false;
+            saving = false;
             Rollback.LOGGER.error("Checkpoint failed", e);
             return -1L;
         }

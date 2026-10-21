@@ -103,10 +103,10 @@ public final class BackupCommand {
         String history = ids.isEmpty() ? "нет" : Times.format(ids.get(0)) + " — " + Times.format(ids.get(ids.size() - 1));
         String pending = Countdown.active() ? "\n§6Запланирован откат до " + Times.format(Countdown.target()) : "";
         context.getSource().sendSuccess(() -> Component.literal(String.format(Locale.ROOT,
-                "§eОткаты: §fточек %d, история %s, %.1f МБ\n§7Точка каждые %d с, хранение %d дн., перегрузка: %s%s",
+                "§eОткаты: §fточек %d, история %s, %.1f МБ\n§7Точка каждые %d с, хранение %d дн., перегрузка: %s\n§7Сторож: %s%s",
                 ids.size(), history, Maintenance.totalSize() / 1048576.0, config.checkpointSeconds, config.retentionDays,
                 config.overload.enabled ? "TPS<" + config.overload.tpsBelow + " " + config.overload.lowTpsSeconds + " с или зависание "
-                        + config.overload.hangSeconds + " с → откат на " + config.overload.rollbackMinutes + " мин" : "выкл", pending)), false);
+                        + config.overload.hangSeconds + " с → откат на " + config.overload.rollbackMinutes + " мин" : "выкл", Overload.describe(), pending)), false);
         return 1;
     }
 

@@ -70,8 +70,8 @@ public final class Countdown {
     }
 
     public static void titles(Iterable<ServerPlayer> players, boolean overload, long target, int seconds) {
-        Component title = Component.literal(overload ? "§cСервер перегружен" : "§6Откат сервера до " + Times.format(target));
-        Component subtitle = Component.literal(overload ? "§fОткат через §c" + seconds : "§fчерез §c" + seconds);
+        Component title = Component.literal(overload ? "§cПерегрузка" : "§6Откат");
+        Component subtitle = Component.literal(overload ? "§fоткат через §c" + seconds : "§fдо " + Times.shortFormat(target) + " через §c" + seconds);
         for (ServerPlayer player : players) {
             player.connection.send(new ClientboundSetTitlesAnimationPacket(0, 30, 5));
             player.connection.send(new ClientboundSetSubtitleTextPacket(subtitle));

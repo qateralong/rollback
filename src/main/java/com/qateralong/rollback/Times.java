@@ -36,6 +36,12 @@ public final class Times {
         return (time.getSecond() == 0 ? SHOW : SHOW_SECONDS).format(time);
     }
 
+    public static String shortFormat(long epochSeconds) {
+        ZonedDateTime time = Instant.ofEpochSecond(epochSeconds).atZone(zone());
+        boolean today = time.toLocalDate().equals(LocalDate.now(zone()));
+        return DateTimeFormatter.ofPattern(today ? "HH:mm" : "dd.MM HH:mm", Locale.ROOT).format(time);
+    }
+
     public static String argument(long epochSeconds) {
         return ARGUMENT.format(Instant.ofEpochSecond(epochSeconds).atZone(zone()));
     }

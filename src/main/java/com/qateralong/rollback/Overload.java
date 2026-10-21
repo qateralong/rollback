@@ -59,9 +59,17 @@ public final class Overload {
         }
     }
 
+    private static volatile String state = "ещё не запущен";
+    private static volatile int lastTps = -1;
+    private static volatile int streak;
+    private static long lastSkipLog;
+
+    public static String describe() {
+        return "TPS " + (lastTps < 0 ? "?" : lastTps) + ", низкий TPS подряд " + streak + " с — " + state;
+    }
+
     private static void loop(MinecraftServer server) {
         int lastCount = tickCount;
-        int lowSeconds = 0;
         long lowSince = 0L;
         while (running) {
             try {
@@ -69,40 +77,68 @@ public final class Overload {
             } catch (InterruptedException e) {
                 return;
             }
-            RollbackConfig.Overload config = RollbackConfig.get().overload;
-            long now = System.currentTimeMillis();
-            int count = tickCount;
-            int ticks = count - lastCount;
-            lastCount = count;
-            if (!config.enabled || now - startedAt < config.startupGraceSeconds * 1000L || now < quietUntil || Countdown.active() || Recorder.busy()
-                    || server.getPlayerList() == null || server.getPlayerCount() == 0) {
-                lowSeconds = 0;
-                continue;
-            }
-            if (now - lastTickWall > config.hangSeconds * 1000L) {
-                hang(server, lastTickWall);
-                lowSeconds = 0;
-                lastCount = tickCount;
-                continue;
-            }
-            double expected = Math.max(1.0, tickRate);
-            if (ticks < config.tpsBelow * expected / 20.0) {
-                if (lowSeconds++ == 0) {
-                    lowSince = now - 1000L;
+            try {
+                RollbackConfig.Overload config = RollbackConfig.get().overload;
+                long now = System.currentTimeMillis();
+                int count = tickCount;
+                int ticks = count - lastCount;
+                lastCount = count;
+                lastTps = ticks;
+                String skip = !config.enabled ? "выключен в конфиге"
+                        : now - startedAt < config.startupGraceSeconds * 1000L ? "запуск сервера, ждёт " + config.startupGraceSeconds + " с"
+                        : now < quietUntil ? "пауза после отмены"
+                        : Countdown.active() ? "идёт отсчёт отката" : null;
+                if (skip != null) {
+                    streak = 0;
+                    state = skip;
+                    continue;
                 }
-                if (lowSeconds >= config.lowTpsSeconds) {
-                    long since = lowSince;
-                    lowSeconds = 0;
-                    server.execute(() -> trigger(server, since, RollbackConfig.get().countdownSeconds, "низкий TPS"));
+                if (!Recorder.saving() && now - lastTickWall > config.hangSeconds * 1000L) {
+                    state = "сервер завис";
+                    hang(server, lastTickWall);
+                    streak = 0;
+                    lastCount = tickCount;
+                    continue;
                 }
-            } else {
-                lowSeconds = 0;
+                double expected = Math.max(1.0, tickRate);
+                if (ticks < config.tpsBelow * expected / 20.0) {
+                    if (streak++ == 0) {
+                        lowSince = now - 1000L;
+                        Rollback.LOGGER.info("TPS dropped to {}, watching for {} s", ticks, config.lowTpsSeconds);
+                    }
+                    state = "низкий TPS";
+                    if (streak >= config.lowTpsSeconds) {
+                        long since = lowSince;
+                        streak = 0;
+                        Rollback.LOGGER.warn("Overload: TPS below {} for {} s", config.tpsBelow, config.lowTpsSeconds);
+                        server.execute(() -> trigger(server, since, RollbackConfig.get().countdownSeconds, "низкий TPS"));
+                    }
+                } else {
+                    streak = 0;
+                    state = "норма";
+                }
+            } catch (Throwable e) {
+                if (System.currentTimeMillis() - lastSkipLog > 60_000L) {
+                    lastSkipLog = System.currentTimeMillis();
+                    Rollback.LOGGER.error("Overload watchdog error", e);
+                }
             }
         }
     }
 
     private static long target(long overloadStartMillis) {
-        return checkpointAtOrBefore(overloadStartMillis / 1000L - RollbackConfig.get().overload.rollbackMinutes * 60L);
+        long wanted = checkpointAtOrBefore(overloadStartMillis / 1000L - RollbackConfig.get().overload.rollbackMinutes * 60L);
+        if (wanted >= 0) {
+            return wanted;
+        }
+        long earliest = checkpointAtOrBefore(overloadStartMillis / 1000L);
+        if (earliest >= 0) {
+            Rollback.LOGGER.warn("No checkpoint {} min before the overload, using the earliest one", RollbackConfig.get().overload.rollbackMinutes);
+            for (long id : Journal.ids(Recorder.world())) {
+                return id;
+            }
+        }
+        return -1L;
     }
 
     private static void trigger(MinecraftServer server, long overloadStart, int seconds, String cause) {
@@ -111,13 +147,16 @@ public final class Overload {
         }
         long target = target(overloadStart);
         if (target < 0) {
+            state = "перегрузка, но нет точки отката";
             Rollback.LOGGER.warn("Server overloaded ({}), but there is no checkpoint to roll back to", cause);
             return;
         }
         if (!AutoLimit.allowed(Recorder.world())) {
+            state = "перегрузка, но лимит автооткатов исчерпан";
             Rollback.LOGGER.warn("Server overloaded ({}), automatic rollback limit per hour reached", cause);
             return;
         }
+        Rollback.LOGGER.warn("Server overloaded ({}), rolling back to {}", cause, Times.format(target));
         Countdown.start(server, target, "перегрузка: " + cause, true, seconds);
     }
 
