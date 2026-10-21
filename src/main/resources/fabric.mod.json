@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "rollback",
+  "version": "${version}",
+  "name": "Rollback",
+  "description": "Server-side rollback: journals changed chunks and player/world data every minute, /backup <time> restores the server to that moment (with a countdown), automatic rollback on overload or hang.",
+  "authors": [
+    "qateralong"
+  ],
+  "license": "All Rights Reserved",
+  "icon": "assets/rollback/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.qateralong.rollback.Rollback"
+    ],
+    "preLaunch": [
+      "com.qateralong.rollback.store.RollbackPreLaunch"
+    ]
+  },
+  "mixins": [
+    "rollback.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
