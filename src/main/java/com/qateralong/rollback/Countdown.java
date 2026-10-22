@@ -6,11 +6,14 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 
 public final class Countdown {
     private static Pending pending;
@@ -72,13 +75,26 @@ public final class Countdown {
     }
 
     public static void titles(Iterable<ServerPlayer> players, boolean overload, long target, int seconds) {
-        Component title = Component.literal(overload ? "§cПерегрузка" : "§6Откат");
+        Component title = Component.literal(overload ? "§cСервер перегружен" : "§6Откат");
         Component subtitle = Component.literal(overload ? "§fоткат через §c" + seconds : "§fдо " + Times.shortFormat(target) + " через §c" + seconds);
+        Component actionbar = overload ? Component.literal("§eОткат всего сервера на " + minutes(target) + " в связи с перегрузкой") : null;
         for (ServerPlayer player : players) {
             player.connection.send(new ClientboundSetTitlesAnimationPacket(0, 30, 5));
             player.connection.send(new ClientboundSetSubtitleTextPacket(subtitle));
             player.connection.send(new ClientboundSetTitleTextPacket(title));
+            if (overload) {
+                player.connection.send(new ClientboundSetActionBarTextPacket(actionbar));
+                player.playNotifySound(SoundEvents.NOTE_BLOCK_BIT.value(), SoundSource.MASTER, 1.0F, 1.0F);
+            }
         }
+    }
+
+    private static String minutes(long target) {
+        long minutes = Math.max(1L, Math.round((System.currentTimeMillis() / 1000.0 - target) / 60.0));
+        long tens = minutes % 100;
+        long last = minutes % 10;
+        String word = tens >= 11 && tens <= 14 ? "минут" : last == 1 ? "минуту" : last >= 2 && last <= 4 ? "минуты" : "минут";
+        return minutes + " " + word;
     }
 
     public static void tick(MinecraftServer server) {

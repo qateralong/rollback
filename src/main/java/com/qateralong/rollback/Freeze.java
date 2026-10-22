@@ -48,8 +48,7 @@ public final class Freeze {
         }
         active = false;
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            double[] held = HELD.get(player.getUUID());
-            release(player, held);
+            release(player);
         }
         HELD.clear();
         if (!wasFrozen) {
@@ -59,11 +58,9 @@ public final class Freeze {
 
     private static double[] hold(ServerPlayer player) {
         return HELD.computeIfAbsent(player.getUUID(), id -> {
-            double[] held = {player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot(), player.getAbilities().getFlyingSpeed()};
+            double[] held = {player.getX(), player.getY(), player.getZ()};
             limit(player, Attributes.MOVEMENT_SPEED);
             limit(player, Attributes.JUMP_STRENGTH);
-            player.getAbilities().setFlyingSpeed(0.0F);
-            player.onUpdateAbilities();
             player.setDeltaMovement(0.0, 0.0, 0.0);
             player.hurtMarked = true;
             return held;
@@ -77,16 +74,12 @@ public final class Freeze {
         }
     }
 
-    private static void release(ServerPlayer player, double[] held) {
+    private static void release(ServerPlayer player) {
         for (Holder<Attribute> attribute : java.util.List.of(Attributes.MOVEMENT_SPEED, Attributes.JUMP_STRENGTH)) {
             AttributeInstance instance = player.getAttribute(attribute);
             if (instance != null) {
                 instance.removeModifier(MODIFIER);
             }
-        }
-        if (held != null) {
-            player.getAbilities().setFlyingSpeed((float) held[5]);
-            player.onUpdateAbilities();
         }
     }
 
