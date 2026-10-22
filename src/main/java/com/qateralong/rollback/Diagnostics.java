@@ -28,6 +28,7 @@ public final class Diagnostics {
             StringBuilder text = new StringBuilder("Server thread has not ticked for ").append(stalled / 1000L).append(" s, ").append(memory()).append('\n');
             append(text, thread, thread.getStackTrace());
             Rollback.LOGGER.warn(text.toString());
+            Notify.throttled(server, "stall", 60_000L, true, "Сервер не отвечает " + stalled / 1000L + " с, " + memory() + ". Стек — в логе");
         }
         Runtime runtime = Runtime.getRuntime();
         long used = runtime.totalMemory() - runtime.freeMemory();
@@ -45,6 +46,7 @@ public final class Diagnostics {
                 }
             }
             Rollback.LOGGER.warn(text.toString());
+            Notify.throttled(server, "memory", 300_000L, true, "Память почти заполнена: " + memory() + ". Потоки — в логе");
         }
     }
 

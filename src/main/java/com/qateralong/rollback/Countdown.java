@@ -41,6 +41,7 @@ public final class Countdown {
         pending = new Pending(target, reason, overload, System.currentTimeMillis() + Math.max(0, seconds) * 1000L, new int[]{-1});
         Freeze.start(server);
         Rollback.LOGGER.info("Rollback to {} scheduled in {} s: {}", Times.format(target), seconds, reason);
+        Notify.alert(server, "Откат до " + Times.format(target) + " через " + seconds + " с (" + reason + "). Отмена: /backup c");
         Component hint = Component.literal("§7Откат до §f" + Times.format(target) + "§7 — отмена: §f/backup c");
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (player.hasPermissions(RollbackConfig.get().permissionLevel)) {
@@ -66,6 +67,7 @@ public final class Countdown {
             player.connection.send(new ClientboundSetSubtitleTextPacket(Component.literal("§aОткат отменён")));
         }
         Rollback.LOGGER.info("Rollback cancelled by {}", by);
+        Notify.info(server, "Откат отменён: " + by);
         return true;
     }
 
@@ -104,6 +106,7 @@ public final class Countdown {
             pending = null;
             Freeze.stop(server);
             Rollback.LOGGER.error("Could not schedule rollback", e);
+            Notify.alert(server, "Не удалось запланировать откат: " + e.getMessage());
             return;
         }
         if (current.overload()) {
@@ -111,6 +114,8 @@ public final class Countdown {
         }
         RollbackEvents.BEFORE_RESTART.invoker().beforeRestart(Instant.ofEpochSecond(current.target()), current.reason());
         Rollback.LOGGER.info("Restarting to roll back to {} ({})", Times.format(current.target()), current.reason());
+        Notify.alert(server, "Сервер перезапускается: откат до " + Times.format(current.target()) + " (" + current.reason() + ")");
+        Notify.flush(3000L);
         Component message = Component.literal(RollbackConfig.get().kickMessage.replace("%time%", Times.format(current.target())));
         List<ServerPlayer> players = new ArrayList<>(server.getPlayerList().getPlayers());
         for (ServerPlayer player : players) {

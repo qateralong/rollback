@@ -175,6 +175,7 @@ public final class Recorder {
             switching = false;
             saving = false;
             Rollback.LOGGER.error("Checkpoint failed", e);
+            Notify.throttled(server, "checkpoint", 1_800_000L, true, "Не удалось создать точку отката: " + e);
             return -1L;
         }
     }

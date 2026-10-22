@@ -67,7 +67,9 @@ public class Rollback implements ModInitializer {
             java.nio.file.Path world = s.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
             if (Files.exists(Restorer.pendingFile(world))) {
                 LOGGER.warn("A rollback is still pending — it will be applied on the next start");
+                Notify.alert(s, "Откат не применился при запуске — подробности в логе");
             }
+            reportRestore(s, world.resolve("rollback").resolve("last_restore.json"));
             Recorder.start(world);
             scheduleNext();
             Overload.start(s);
@@ -75,6 +77,25 @@ public class Rollback implements ModInitializer {
             LOGGER.info("Recording world changes in {}", world.resolve("rollback"));
         } catch (Exception e) {
             LOGGER.error("Rollback recording could not start", e);
+        }
+    }
+
+    private static void reportRestore(MinecraftServer s, java.nio.file.Path file) {
+        try {
+            if (!Files.exists(file)) {
+                return;
+            }
+            com.google.gson.JsonObject json = GSON.fromJson(Files.readString(file), com.google.gson.JsonObject.class);
+            if (json == null || json.has("notified")) {
+                return;
+            }
+            Notify.alert(s, "Мир откачен до " + Times.format(json.get("target").getAsLong())
+                    + (json.has("reason") ? " (" + json.get("reason").getAsString() + ")" : "")
+                    + ": чанков " + json.get("chunks").getAsInt() + ", файлов " + json.get("files").getAsInt());
+            json.addProperty("notified", true);
+            com.qateralong.rollback.store.TrackedFiles.write(file, GSON.toJson(json).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            LOGGER.warn("Could not read {}", file);
         }
     }
 

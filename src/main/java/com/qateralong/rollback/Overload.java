@@ -106,6 +106,7 @@ public final class Overload {
                     if (streak++ == 0) {
                         lowSince = now - 1000L;
                         Rollback.LOGGER.info("TPS dropped to {}, watching for {} s", ticks, config.lowTpsSeconds);
+                        Notify.throttled(server, "tps", 120_000L, false, "TPS упал до " + ticks + ", слежу " + config.lowTpsSeconds + " с");
                     }
                     state = "низкий TPS";
                     if (streak >= config.lowTpsSeconds) {
@@ -150,11 +151,13 @@ public final class Overload {
         if (target < 0) {
             state = "перегрузка, но нет точки отката";
             Rollback.LOGGER.warn("Server overloaded ({}), but there is no checkpoint to roll back to", cause);
+            Notify.throttled(server, "nocheckpoint", 600_000L, true, "Перегрузка (" + cause + "), но точки отката нет");
             return;
         }
         if (!AutoLimit.allowed(Recorder.world())) {
             state = "перегрузка, но лимит автооткатов исчерпан";
             Rollback.LOGGER.warn("Server overloaded ({}), automatic rollback limit per hour reached", cause);
+            Notify.throttled(server, "limit", 600_000L, true, "Перегрузка (" + cause + "), но лимит автооткатов за час исчерпан — нужен админ");
             return;
         }
         Rollback.LOGGER.warn("Server overloaded ({}), rolling back to {}", cause, Times.format(target));
@@ -167,6 +170,7 @@ public final class Overload {
         Rollback.LOGGER.warn("Server thread has not ticked for {} s", (System.currentTimeMillis() - since) / 1000L);
         if (target < 0 || !AutoLimit.allowed(Recorder.world())) {
             Rollback.LOGGER.warn("Hang detected, but automatic rollback is not possible (no checkpoint or limit reached)");
+            Notify.throttled(server, "hang", 600_000L, true, "Сервер завис, но автооткат невозможен (нет точки или исчерпан лимит)");
             return;
         }
         int frozenAt = tickCount;
@@ -195,6 +199,8 @@ public final class Overload {
             return;
         }
         Rollback.LOGGER.error("Server hung — halting to roll back to {}", Times.format(target));
+        Notify.alert(server, "Сервер завис — перезапуск с откатом до " + Times.format(target));
+        Notify.flush(3000L);
         Component message = Component.literal(config.kickMessage.replace("%time%", Times.format(target)));
         for (ServerPlayer player : players(server)) {
             try {

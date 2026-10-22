@@ -19,6 +19,8 @@ public class RollbackConfig {
     public String timeZone = "";
     public int permissionLevel = 3;
     public int exitCode = 0;
+    public boolean notifyAdmins = true;
+    public boolean notifyTelegram = true;
     public String kickMessage = "Откат сервера до %time%. Сервер перезапускается — зайдите через минуту.";
     public Overload overload = new Overload();
 
