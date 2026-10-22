@@ -78,6 +78,7 @@ public final class Overload {
                 return;
             }
             try {
+                Diagnostics.check(server, lastTickWall);
                 RollbackConfig.Overload config = RollbackConfig.get().overload;
                 long now = System.currentTimeMillis();
                 int count = tickCount;
