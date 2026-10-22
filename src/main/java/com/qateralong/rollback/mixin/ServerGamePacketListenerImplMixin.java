@@ -26,7 +26,8 @@ public abstract class ServerGamePacketListenerImplMixin {
     @Inject(method = "handleMovePlayer", at = @At(value = "INVOKE", target = ENSURE, shift = At.Shift.AFTER), cancellable = true)
     private void rollback$move(ServerboundMovePlayerPacket packet, CallbackInfo ci) {
         if (Freeze.blocks(this.player)) {
-            Freeze.holdPosition(this.player);
+            Freeze.holdPosition(this.player, packet.getX(this.player.getX()), packet.getY(this.player.getY()), packet.getZ(this.player.getZ()),
+                    packet.getYRot(this.player.getYRot()), packet.getXRot(this.player.getXRot()));
             ci.cancel();
         }
     }

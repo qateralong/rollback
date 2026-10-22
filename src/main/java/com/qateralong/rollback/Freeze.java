@@ -3,11 +3,18 @@ package com.qateralong.rollback;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.Holder;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 
 public final class Freeze {
+    private static final ResourceLocation MODIFIER = ResourceLocation.fromNamespaceAndPath(Rollback.MOD_ID, "freeze");
     private static final Map<UUID, double[]> HELD = new ConcurrentHashMap<>();
     private static volatile boolean active;
     private static boolean wasFrozen;
@@ -40,6 +47,10 @@ public final class Freeze {
             return;
         }
         active = false;
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            double[] held = HELD.get(player.getUUID());
+            release(player, held);
+        }
         HELD.clear();
         if (!wasFrozen) {
             server.tickRateManager().setFrozen(false);
@@ -47,15 +58,42 @@ public final class Freeze {
     }
 
     private static double[] hold(ServerPlayer player) {
-        return HELD.computeIfAbsent(player.getUUID(), id -> new double[]{player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot(), 0});
+        return HELD.computeIfAbsent(player.getUUID(), id -> {
+            double[] held = {player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot(), player.getAbilities().getFlyingSpeed()};
+            limit(player, Attributes.MOVEMENT_SPEED);
+            limit(player, Attributes.JUMP_STRENGTH);
+            player.getAbilities().setFlyingSpeed(0.0F);
+            player.onUpdateAbilities();
+            player.setDeltaMovement(0.0, 0.0, 0.0);
+            player.hurtMarked = true;
+            return held;
+        });
     }
 
-    public static void holdPosition(ServerPlayer player) {
+    private static void limit(ServerPlayer player, Holder<Attribute> attribute) {
+        AttributeInstance instance = player.getAttribute(attribute);
+        if (instance != null && !instance.hasModifier(MODIFIER)) {
+            instance.addTransientModifier(new AttributeModifier(MODIFIER, -1.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+        }
+    }
+
+    private static void release(ServerPlayer player, double[] held) {
+        for (Holder<Attribute> attribute : java.util.List.of(Attributes.MOVEMENT_SPEED, Attributes.JUMP_STRENGTH)) {
+            AttributeInstance instance = player.getAttribute(attribute);
+            if (instance != null) {
+                instance.removeModifier(MODIFIER);
+            }
+        }
+        if (held != null) {
+            player.getAbilities().setFlyingSpeed((float) held[5]);
+            player.onUpdateAbilities();
+        }
+    }
+
+    public static void holdPosition(ServerPlayer player, double x, double y, double z, float yRot, float xRot) {
         double[] held = hold(player);
-        long now = System.currentTimeMillis();
-        if (now - (long) held[5] > 250L) {
-            held[5] = now;
-            player.connection.teleport(held[0], held[1], held[2], (float) held[3], (float) held[4]);
+        if (Math.abs(x - held[0]) > 1.0E-3 || Math.abs(y - held[1]) > 1.0E-3 || Math.abs(z - held[2]) > 1.0E-3) {
+            player.connection.teleport(held[0], held[1], held[2], yRot, xRot);
         }
     }
 }
