@@ -37,6 +37,7 @@ public class Rollback implements ModInitializer {
     public void onInitialize() {
         RollbackConfig.load();
         CommandRegistrationCallback.EVENT.register((dispatcher, access, environment) -> BackupCommand.register(dispatcher));
+        PanelNet.init();
         ServerLifecycleEvents.SERVER_STARTED.register(Rollback::started);
         ServerLifecycleEvents.SERVER_STOPPING.register(s -> {
             Overload.stop();
