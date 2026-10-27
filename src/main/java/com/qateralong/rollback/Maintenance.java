@@ -22,7 +22,7 @@ public final class Maintenance {
             thread.setPriority(Thread.MIN_PRIORITY);
             return thread;
         });
-        executor.scheduleWithFixedDelay(Maintenance::run, 2, 10, TimeUnit.MINUTES);
+        executor.scheduleWithFixedDelay(Maintenance::run, 2, 5, TimeUnit.MINUTES);
     }
 
     public static void stop() {
@@ -94,10 +94,16 @@ public final class Maintenance {
     }
 
     private static long bucket(long age, RollbackConfig config) {
-        if (age <= config.keepEveryCheckpointHours * 3600L) {
-            return 0L;
+        long step = 0L;
+        long threshold = -1L;
+        for (RollbackConfig.Tier tier : config.history) {
+            long after = tier.olderThanMinutes * 60L;
+            if (age > after && after > threshold) {
+                threshold = after;
+                step = Math.max(0L, tier.everyMinutes * 60L);
+            }
         }
-        return age <= config.keepTenMinutesHours * 3600L ? 600L : 3600L;
+        return step;
     }
 
     public static long totalSize() {

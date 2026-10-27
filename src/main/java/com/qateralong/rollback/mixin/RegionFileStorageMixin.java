@@ -24,6 +24,6 @@ public abstract class RegionFileStorageMixin {
 
     @Inject(method = "write", at = @At("HEAD"))
     private void rollback$journal(ChunkPos pos, CompoundTag tag, CallbackInfo ci) {
-        Recorder.beforeRegionWrite(this.folder, pos, this::read);
+        Recorder.beforeRegionWrite(this.folder, pos, tag, this::read);
     }
 }

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -187,22 +188,147 @@ public final class Journal {
         }
     }
 
+    public record ChunkRef(Path dir, String folder, int x, int z, long offset, int length) {
+        public String key() {
+            return chunkKey(this.folder, this.x, this.z);
+        }
+    }
+
+    public static List<ChunkRef> indexChunks(Path dir) throws IOException {
+        List<ChunkRef> result = new ArrayList<>();
+        Path file = dir.resolve(CHUNKS);
+        if (!Files.exists(file)) {
+            return result;
+        }
+        try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(file, StandardOpenOption.READ)) {
+            long size = channel.size();
+            long position = 0L;
+            java.nio.ByteBuffer head = java.nio.ByteBuffer.allocate(2);
+            while (position + 2 <= size) {
+                head.clear();
+                channel.read(head, position);
+                head.flip();
+                int nameLength = head.getShort() & 0xFFFF;
+                if (position + 2 + nameLength + 9 > size) {
+                    break;
+                }
+                java.nio.ByteBuffer meta = java.nio.ByteBuffer.allocate(2 + nameLength + 9);
+                channel.read(meta, position);
+                meta.flip();
+                String folder = new DataInputStream(new java.io.ByteArrayInputStream(meta.array(), 0, 2 + nameLength)).readUTF();
+                meta.position(2 + nameLength);
+                int x = meta.getInt();
+                int z = meta.getInt();
+                boolean present = meta.get() != 0;
+                long next = position + 2 + nameLength + 9;
+                int length = -1;
+                if (present) {
+                    if (next + 4 > size) {
+                        break;
+                    }
+                    java.nio.ByteBuffer len = java.nio.ByteBuffer.allocate(4);
+                    channel.read(len, next);
+                    len.flip();
+                    length = len.getInt();
+                    next += 4;
+                    if (length < 0 || next + length > size) {
+                        break;
+                    }
+                }
+                result.add(new ChunkRef(dir, folder, x, z, next, length));
+                position = next + Math.max(0, length);
+            }
+        }
+        return result;
+    }
+
+    public static byte[] read(ChunkRef ref) throws IOException {
+        if (ref.length() < 0) {
+            return ABSENT;
+        }
+        try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(ref.dir().resolve(CHUNKS), StandardOpenOption.READ)) {
+            java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(ref.length());
+            while (buffer.hasRemaining()) {
+                if (channel.read(buffer, ref.offset() + buffer.position()) < 0) {
+                    throw new EOFException();
+                }
+            }
+            return buffer.array();
+        }
+    }
+
+    public static List<byte[]> compact(String folder, List<byte[]> records) {
+        List<byte[]> result = new ArrayList<>();
+        if (!ChunkDiff.supported(folder)) {
+            result.add(records.get(0));
+            return result;
+        }
+        net.minecraft.nbt.CompoundTag merged = null;
+        try {
+            for (byte[] record : records) {
+                if (!ChunkCodec.isDiff(record)) {
+                    if (merged != null) {
+                        result.add(ChunkCodec.diff(merged));
+                    }
+                    result.add(record);
+                    return result;
+                }
+                net.minecraft.nbt.CompoundTag diff = ChunkCodec.read(record);
+                if (merged == null) {
+                    merged = diff;
+                } else {
+                    ChunkDiff.merge(merged, diff);
+                }
+            }
+            result.add(ChunkCodec.diff(merged));
+            return result;
+        } catch (IOException | RuntimeException e) {
+            result.clear();
+            for (byte[] record : records) {
+                result.add(record);
+                if (!ChunkCodec.isDiff(record)) {
+                    break;
+                }
+            }
+            return result;
+        }
+    }
+
     public static void merge(Journal into, List<Journal> later) throws IOException {
-        Set<String> chunkKeys = new HashSet<>();
+        Map<String, List<ChunkRef>> refs = new java.util.LinkedHashMap<>();
+        List<Journal> all = new ArrayList<>();
+        all.add(into);
+        all.addAll(later);
+        for (Journal journal : all) {
+            for (ChunkRef ref : indexChunks(journal.dir)) {
+                refs.computeIfAbsent(ref.key(), key -> new ArrayList<>()).add(ref);
+            }
+        }
+        Path tmp = into.dir.resolve(CHUNKS + ".tmp");
+        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(tmp), 65536))) {
+            for (List<ChunkRef> list : refs.values()) {
+                ChunkRef first = list.get(0);
+                List<byte[]> records = new ArrayList<>();
+                for (ChunkRef ref : list) {
+                    byte[] payload = read(ref);
+                    records.add(payload);
+                    if (!ChunkCodec.isDiff(payload)) {
+                        break;
+                    }
+                }
+                for (byte[] payload : records.size() == 1 ? records : compact(first.folder(), records)) {
+                    out.writeUTF(first.folder());
+                    out.writeInt(first.x());
+                    out.writeInt(first.z());
+                    writeData(out, payload);
+                }
+            }
+        }
+        Files.move(tmp, into.dir.resolve(CHUNKS), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         Set<String> fileKeys = new HashSet<>();
-        readChunks(into.dir, (folder, x, z, payload) -> chunkKeys.add(chunkKey(folder, x, z)));
         readFiles(into.dir, (path, data) -> fileKeys.add(path));
         for (Journal journal : later) {
             IOException[] failure = new IOException[1];
-            readChunks(journal.dir, (folder, x, z, payload) -> {
-                if (failure[0] == null && chunkKeys.add(chunkKey(folder, x, z))) {
-                    try {
-                        into.recordChunk(folder, x, z, payload);
-                    } catch (IOException e) {
-                        failure[0] = e;
-                    }
-                }
-            });
             readFiles(journal.dir, (path, data) -> {
                 if (failure[0] == null && fileKeys.add(path)) {
                     try {

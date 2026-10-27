@@ -30,10 +30,21 @@ public final class RegionIO {
         return folder.resolve("c." + x + "." + z + ".mcc");
     }
 
+    public static byte[][] read(Path folder, int regionX, int regionZ) throws IOException {
+        byte[][] payloads = new byte[1024][];
+        load(folder.resolve("r." + regionX + "." + regionZ + ".mca"), payloads, new int[1024]);
+        return payloads;
+    }
+
     public static void apply(Path folder, int regionX, int regionZ, Map<Integer, byte[]> changes) throws IOException {
         Path file = folder.resolve("r." + regionX + "." + regionZ + ".mca");
         byte[][] payloads = new byte[1024][];
         int[] timestamps = new int[1024];
+        load(file, payloads, timestamps);
+        write(folder, file, regionX, regionZ, payloads, timestamps, changes);
+    }
+
+    private static void load(Path file, byte[][] payloads, int[] timestamps) throws IOException {
         if (Files.exists(file) && Files.size(file) >= 2L * SECTOR) {
             try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
                 ByteBuffer header = ByteBuffer.allocate(2 * SECTOR);
@@ -70,6 +81,9 @@ public final class RegionIO {
                 }
             }
         }
+    }
+
+    private static void write(Path folder, Path file, int regionX, int regionZ, byte[][] payloads, int[] timestamps, Map<Integer, byte[]> changes) throws IOException {
         int now = (int) (System.currentTimeMillis() / 1000L);
         for (Map.Entry<Integer, byte[]> change : changes.entrySet()) {
             int i = change.getKey();

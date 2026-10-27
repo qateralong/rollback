@@ -66,14 +66,35 @@ public final class Restorer {
         }
     }
 
+    private static byte[] resolve(Path folder, int x, int z, List<Journal.ChunkRef> refs, byte[] current) throws IOException {
+        List<byte[]> records = new java.util.ArrayList<>();
+        boolean diffs = false;
+        for (Journal.ChunkRef ref : refs) {
+            byte[] payload = Journal.read(ref);
+            records.add(payload);
+            if (!ChunkCodec.isDiff(payload)) {
+                break;
+            }
+            diffs = true;
+        }
+        if (!diffs) {
+            return records.get(0);
+        }
+        net.minecraft.nbt.CompoundTag now = current == null || current.length == 0 ? null : ChunkCodec.read(current, folder, x, z);
+        net.minecraft.nbt.CompoundTag restored = ChunkDiff.resolve(records, now);
+        return restored == null ? Journal.ABSENT : ChunkCodec.full(restored);
+    }
+
     public static int[] restore(Path world, long target) throws IOException {
         List<Long> ids = Journal.ids(world).stream().filter(id -> id >= target).toList();
-        Map<String, Map<Long, byte[]>> chunks = new LinkedHashMap<>();
+        Map<String, Map<Long, List<Journal.ChunkRef>>> chunks = new LinkedHashMap<>();
         Map<String, byte[]> files = new HashMap<>();
         for (long id : ids) {
             Path dir = Journal.open(world, id).dir;
-            Journal.readChunks(dir, (folder, x, z, payload) ->
-                    chunks.computeIfAbsent(folder, key -> new HashMap<>()).putIfAbsent(((long) x << 32) ^ (z & 0xFFFFFFFFL), payload));
+            for (Journal.ChunkRef ref : Journal.indexChunks(dir)) {
+                chunks.computeIfAbsent(ref.folder(), key -> new LinkedHashMap<>())
+                        .computeIfAbsent(((long) ref.x() << 32) ^ (ref.z() & 0xFFFFFFFFL), key -> new java.util.ArrayList<>()).add(ref);
+            }
             Journal.readFiles(dir, files::putIfAbsent);
         }
         Path mirror = TrackedFiles.mirror(world);
@@ -92,21 +113,35 @@ public final class Restorer {
             }
         }
         int chunkCount = 0;
-        for (Map.Entry<String, Map<Long, byte[]>> entry : chunks.entrySet()) {
+        for (Map.Entry<String, Map<Long, List<Journal.ChunkRef>>> entry : chunks.entrySet()) {
             Path folder = world.resolve(entry.getKey()).normalize();
             if (!folder.startsWith(world)) {
                 continue;
             }
-            Map<Long, Map<Integer, byte[]>> regions = new HashMap<>();
-            for (Map.Entry<Long, byte[]> chunk : entry.getValue().entrySet()) {
+            Map<Long, Map<Integer, List<Journal.ChunkRef>>> regions = new HashMap<>();
+            for (Map.Entry<Long, List<Journal.ChunkRef>> chunk : entry.getValue().entrySet()) {
                 int x = (int) (chunk.getKey() >> 32);
                 int z = (int) (long) chunk.getKey();
                 long region = ((long) (x >> 5) << 32) ^ ((z >> 5) & 0xFFFFFFFFL);
                 regions.computeIfAbsent(region, key -> new HashMap<>()).put(RegionIO.index(x, z), chunk.getValue());
-                chunkCount++;
             }
-            for (Map.Entry<Long, Map<Integer, byte[]>> region : regions.entrySet()) {
-                RegionIO.apply(folder, (int) (region.getKey() >> 32), (int) (long) region.getKey(), region.getValue());
+            for (Map.Entry<Long, Map<Integer, List<Journal.ChunkRef>>> region : regions.entrySet()) {
+                int regionX = (int) (region.getKey() >> 32);
+                int regionZ = (int) (long) region.getKey();
+                byte[][] current = RegionIO.read(folder, regionX, regionZ);
+                Map<Integer, byte[]> changes = new HashMap<>();
+                for (Map.Entry<Integer, List<Journal.ChunkRef>> chunk : region.getValue().entrySet()) {
+                    int index = chunk.getKey();
+                    int x = regionX * 32 + (index & 31);
+                    int z = regionZ * 32 + (index >> 5);
+                    try {
+                        changes.put(index, resolve(folder, x, z, chunk.getValue(), current[index]));
+                        chunkCount++;
+                    } catch (Exception e) {
+                        LOGGER.error("Failed to restore chunk {} {} in {}", x, z, entry.getKey(), e);
+                    }
+                }
+                RegionIO.apply(folder, regionX, regionZ, changes);
             }
         }
         for (Map.Entry<String, byte[]> file : files.entrySet()) {

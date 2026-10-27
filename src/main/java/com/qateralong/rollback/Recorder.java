@@ -1,10 +1,10 @@
 package com.qateralong.rollback;
 
 import com.qateralong.rollback.api.RollbackEvents;
+import com.qateralong.rollback.store.ChunkCodec;
+import com.qateralong.rollback.store.ChunkDiff;
 import com.qateralong.rollback.store.Journal;
 import com.qateralong.rollback.store.TrackedFiles;
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,9 +15,7 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.zip.DeflaterOutputStream;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.ChunkPos;
 import com.qateralong.rollback.mixin.IOWorkerAccessor;
@@ -32,7 +30,7 @@ public final class Recorder {
     private static volatile long switchingSince;
     private static Journal previous;
 
-    private record Interval(Journal journal, Set<String> recorded) {
+    private record Interval(Journal journal, Set<String> full) {
         Interval(Journal journal) {
             this(journal, ConcurrentHashMap.newKeySet());
         }
@@ -87,7 +85,7 @@ public final class Recorder {
         }
     }
 
-    public static void beforeRegionWrite(Path folder, ChunkPos pos, ChunkReader reader) {
+    public static void beforeRegionWrite(Path folder, ChunkPos pos, CompoundTag now, ChunkReader reader) {
         Interval current = interval;
         Path root = world;
         if (current == null || root == null) {
@@ -98,12 +96,24 @@ public final class Recorder {
             return;
         }
         String rel = root.relativize(absolute).toString().replace('\\', '/');
-        if (!current.recorded().add(Journal.chunkKey(rel, pos.x, pos.z))) {
+        String key = Journal.chunkKey(rel, pos.x, pos.z);
+        if (current.full().contains(key)) {
             return;
         }
         try {
             CompoundTag old = reader.read(pos);
-            current.journal().recordChunk(rel, pos.x, pos.z, old == null ? Journal.ABSENT : encode(old));
+            if (old == null) {
+                current.full().add(key);
+                current.journal().recordChunk(rel, pos.x, pos.z, Journal.ABSENT);
+                return;
+            }
+            CompoundTag diff = now == null || !ChunkDiff.supported(rel) ? null : ChunkDiff.diff(rel, old, now);
+            if (diff == null) {
+                current.full().add(key);
+                current.journal().recordChunk(rel, pos.x, pos.z, ChunkCodec.full(old));
+            } else if (!diff.isEmpty()) {
+                current.journal().recordChunk(rel, pos.x, pos.z, ChunkCodec.diff(diff));
+            }
         } catch (Exception e) {
             Rollback.LOGGER.error("Failed to journal chunk {} in {}", pos, rel, e);
         }
@@ -111,15 +121,6 @@ public final class Recorder {
 
     public interface ChunkReader {
         CompoundTag read(ChunkPos pos) throws IOException;
-    }
-
-    private static byte[] encode(CompoundTag tag) throws IOException {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream(8192);
-        bytes.write(2);
-        try (DataOutputStream out = new DataOutputStream(new java.io.BufferedOutputStream(new DeflaterOutputStream(bytes)))) {
-            NbtIo.write(tag, out);
-        }
-        return bytes.toByteArray();
     }
 
     public static long checkpoint(MinecraftServer server) {
