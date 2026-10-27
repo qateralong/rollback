@@ -29,6 +29,12 @@ public final class BackupCommand {
                 .then(Commands.literal("c").executes(BackupCommand::cancel))
                 .then(Commands.literal("cancel").executes(BackupCommand::cancel))
                 .then(Commands.literal("status").executes(BackupCommand::status))
+                .then(Commands.literal("reload").executes(context -> {
+                    RollbackConfig.load();
+                    Rollback.scheduleNext();
+                    context.getSource().sendSuccess(() -> Component.literal("Конфиг rollback перезагружен"), true);
+                    return 1;
+                }))
                 .then(Commands.literal("now").executes(context -> {
                     long id = Recorder.checkpoint(context.getSource().getServer());
                     if (id < 0) {

@@ -99,7 +99,7 @@ public class Rollback implements ModInitializer {
         }
     }
 
-    private static void scheduleNext() {
+    static void scheduleNext() {
         long step = Math.max(1, RollbackConfig.get().checkpointSeconds) * 1000L;
         nextCheckpoint = (System.currentTimeMillis() / step + 1) * step;
     }
