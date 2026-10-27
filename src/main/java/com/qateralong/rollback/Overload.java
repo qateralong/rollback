@@ -201,7 +201,7 @@ public final class Overload {
         Rollback.LOGGER.error("Server hung — halting to roll back to {}", Times.format(target));
         Notify.alert(server, "Сервер завис — перезапуск с откатом до " + Times.format(target));
         Notify.flush(3000L);
-        Component message = Component.literal(config.kickMessage.replace("%time%", Times.format(target)));
+        Component message = Component.literal(config.overloadKickMessage.replace("%time%", Times.format(target)));
         for (ServerPlayer player : players(server)) {
             try {
                 var connection = ((com.qateralong.rollback.mixin.ConnectionAccessor) player.connection).rollback$connection();

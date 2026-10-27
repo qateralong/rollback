@@ -132,7 +132,8 @@ public final class Countdown {
         Rollback.LOGGER.info("Restarting to roll back to {} ({})", Times.format(current.target()), current.reason());
         Notify.alert(server, "Сервер перезапускается: откат до " + Times.format(current.target()) + " (" + current.reason() + ")");
         Notify.flush(3000L);
-        Component message = Component.literal(RollbackConfig.get().kickMessage.replace("%time%", Times.format(current.target())));
+        RollbackConfig config = RollbackConfig.get();
+        Component message = Component.literal((current.overload() ? config.overloadKickMessage : config.kickMessage).replace("%time%", Times.format(current.target())));
         List<ServerPlayer> players = new ArrayList<>(server.getPlayerList().getPlayers());
         for (ServerPlayer player : players) {
             player.connection.disconnect(message);

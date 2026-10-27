@@ -32,6 +32,10 @@ public final class BackupCommand {
                 .then(Commands.literal("reload").executes(context -> {
                     RollbackConfig.load();
                     Rollback.scheduleNext();
+                    if (RollbackConfig.brokenConfig != null) {
+                        context.getSource().sendFailure(Component.literal("Ошибка в config/rollback.json, работают значения по умолчанию: " + RollbackConfig.brokenConfig));
+                        return 0;
+                    }
                     context.getSource().sendSuccess(() -> Component.literal("Конфиг rollback перезагружен"), true);
                     return 1;
                 }))

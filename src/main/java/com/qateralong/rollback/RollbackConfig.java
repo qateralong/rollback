@@ -21,6 +21,7 @@ public class RollbackConfig {
     public boolean notifyAdmins = true;
     public boolean notifyTelegram = true;
     public String kickMessage = "Откат сервера до %time%. Сервер перезапускается — зайдите через минуту.";
+    public String overloadKickMessage = "Сервер перегружен — откат до %time%. Сервер перезапускается — зайдите через минуту.";
     public Overload overload = new Overload();
 
     public static class Tier {
@@ -48,15 +49,24 @@ public class RollbackConfig {
         public int hangExitCode = 1;
     }
 
+    public static String brokenConfig;
+
     public static RollbackConfig get() {
         return instance;
     }
 
     public static void load() {
+        brokenConfig = null;
         try {
             if (Files.exists(FILE)) {
                 try (Reader reader = Files.newBufferedReader(FILE)) {
-                    RollbackConfig loaded = Rollback.GSON.fromJson(reader, RollbackConfig.class);
+                    com.google.gson.JsonObject tree = com.google.gson.JsonParser.parseReader(reader).getAsJsonObject();
+                    RollbackConfig loaded = Rollback.GSON.fromJson(tree, RollbackConfig.class);
+                    if (loaded != null && !tree.has("overloadKickMessage") && loaded.kickMessage != null
+                            && loaded.kickMessage.toLowerCase(java.util.Locale.ROOT).contains("перегруз")) {
+                        loaded.overloadKickMessage = loaded.kickMessage;
+                        loaded.kickMessage = new RollbackConfig().kickMessage;
+                    }
                     if (loaded != null) {
                         if (loaded.history == null) {
                             loaded.history = new RollbackConfig().history;
@@ -72,7 +82,8 @@ public class RollbackConfig {
                 Rollback.GSON.toJson(instance, writer);
             }
         } catch (Exception e) {
-            Rollback.LOGGER.error("Failed to load {}", FILE, e);
+            Rollback.LOGGER.error("Failed to load {} — the file has a JSON error, defaults are used until it is fixed: {}", FILE, e.getMessage());
+            brokenConfig = e.getMessage();
         }
     }
 }
