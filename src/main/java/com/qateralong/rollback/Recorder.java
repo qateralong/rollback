@@ -15,6 +15,9 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.ChunkPos;
@@ -23,6 +26,11 @@ import net.minecraft.world.level.chunk.storage.IOWorker;
 
 public final class Recorder {
     private static final Set<IOWorker> WORKERS = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
+    private static final ExecutorService FILES = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "rollback files");
+        thread.setDaemon(true);
+        return thread;
+    });
     private static volatile Interval interval;
     private static volatile Path world;
     private static volatile boolean switching;
@@ -74,6 +82,12 @@ public final class Recorder {
     }
 
     public static void stop() {
+        try {
+            CompletableFuture.runAsync(() -> {
+            }, FILES).get(60, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            Rollback.LOGGER.warn("World file journal did not finish writing before shutdown");
+        }
         Interval current = interval;
         interval = null;
         if (current != null) {
@@ -143,12 +157,23 @@ public final class Recorder {
             } finally {
                 saving = false;
             }
-            TrackedFiles.diffInto(world, closing.journal());
+            Path root = world;
+            Journal target = closing.journal();
+            TrackedFiles.Changes changes = TrackedFiles.snapshot(root);
             long now = System.currentTimeMillis() / 1000L;
             long step = Math.max(1, RollbackConfig.get().checkpointSeconds);
             long id = Math.max(closing.journal().id + 1, now / step * step);
             Journal next = Journal.create(world, id);
             List<CompletableFuture<Void>> futures = new ArrayList<>();
+            if (!changes.empty()) {
+                futures.add(CompletableFuture.runAsync(() -> {
+                    try {
+                        TrackedFiles.apply(root, changes, target);
+                    } catch (IOException e) {
+                        Rollback.LOGGER.error("Failed to journal world files", e);
+                    }
+                }, FILES));
+            }
             synchronized (WORKERS) {
                 for (IOWorker worker : WORKERS) {
                     if (!((IOWorkerAccessor) worker).rollback$shutdownRequested().get()) {
@@ -158,7 +183,7 @@ public final class Recorder {
             }
             CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).orTimeout(15, java.util.concurrent.TimeUnit.SECONDS).whenComplete((result, error) -> {
                 if (error != null) {
-                    Rollback.LOGGER.warn("Region writes did not flush in 15 s, switching checkpoint anyway");
+                    Rollback.LOGGER.warn("Checkpoint writes did not finish in 15 s, switching checkpoint anyway");
                 }
                 if (interval == closing) {
                     interval = new Interval(next);

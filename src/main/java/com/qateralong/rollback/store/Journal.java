@@ -118,6 +118,7 @@ public final class Journal {
     }
 
     private static DataOutputStream open(Path file) throws IOException {
+        Files.createDirectories(file.getParent());
         return new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(file, StandardOpenOption.CREATE, StandardOpenOption.APPEND), 65536));
     }
 

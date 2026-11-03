@@ -41,7 +41,7 @@ public class RollbackConfig {
         public boolean enabled = true;
         public double tpsBelow = 10.0;
         public int lowTpsSeconds = 15;
-        public int hangSeconds = 10;
+        public int hangSeconds = 30;
         public int rollbackMinutes = 2;
         public int startupGraceSeconds = 120;
         public int maxAutoRollbacksPerHour = 2;

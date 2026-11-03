@@ -100,6 +100,7 @@ public final class Restorer {
         Path mirror = TrackedFiles.mirror(world);
         Set<String> candidates = TrackedFiles.list(world);
         candidates.addAll(TrackedFiles.mirrored(world));
+        candidates.removeIf(rel -> !TrackedFiles.tracked(rel));
         for (String rel : candidates) {
             if (files.containsKey(rel)) {
                 continue;
